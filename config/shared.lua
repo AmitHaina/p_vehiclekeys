@@ -1,8 +1,12 @@
 local Config = {}
 
 -- ## Set your Framework / Inventory / Language etc in p_bridge!
+-- Download it here: https://github.com/PiotreeQ/p_bridge\
+-- You can use /spawnKeys command to test key spawning (must be in a vehicle and Config.Debug must be true in p_bridge config)
 
 ---@class Config.Settings
+---@field keepSteeringWheel: boolean Whether to keep steering wheel position when exiting vehicle
+---@field vehicleTiers: table Vehicle class to tier mapping for security upgrades
 Config.Settings = {
     keepSteeringWheel = true, -- Whether to keep steering wheel position when exiting vehicle
     vehicleTiers = {
@@ -20,6 +24,7 @@ Config.Settings = {
 ---@field canToggle: fun():boolean A function that returns whether the player can toggle vehicle locks (not dead, cuffed, etc).
 ---@field ignoreBikes: boolean [true = bikes are always unlocked, false = bikes can be locked]
 ---@field lockNpcVehicles: boolean Whether NPC vehicles can be locked/unlocked.
+---@field unlockToolJobs: table A list of jobs that can unlock vehicles without keys (e.g., police, mechanic).
 Config.Locks = {
     carEffect = true,
     playAnimation = 'advanced',
@@ -37,7 +42,8 @@ Config.Locks = {
         return true
     end,
     ignoreBikes = true,
-    lockNpcVehicles = true
+    lockNpcVehicles = true,
+    unlockToolJobs = {'mechanic', 'police'},
 }
 
 ---@class Config.Engine
@@ -128,8 +134,10 @@ Config.Theft = {
     
     -- Blacklisted vehicle models (cannot be lockpicked)
     blacklistedModels = {
-        -- Add vehicle model hashes or names here
-        -- Example: 'police', 'police2', 'police3'
+        ['police'] = true,
+        ['police2'] = true,
+        ['police3'] = true,
+        ['police4'] = true,
     },
     
     -- Can the player attempt to lockpick? (additional checks)
@@ -143,6 +151,47 @@ Config.Theft = {
         end
         return true
     end
+}
+
+---@class Config.Compat
+---@field enabled: boolean Provide drop-in exports/events for other vehicle key resources (qb-vehiclekeys, qbx_vehiclekeys, Renewed-Vehiclekeys, MrNewbVehicleKeys, qs-vehiclekeys, p_carkeys). Scripts calling those exports will be redirected to p_vehiclekeys. Shims are skipped for any of those resources that is actually running.
+Config.Compat = {
+    enabled = true,
+}
+
+---@class Config.SecurityUpgrade
+---@field enabled: boolean Whether to enable vehicle security tier upgrade system
+---@field requiredJob: string The job required to upgrade security
+---@field upgrades: table Configuration for each security tier upgrade
+Config.SecurityUpgrade = {
+    enabled = true,
+    requiredJob = {'mechanic'}, -- Job required to upgrade security
+    upgrades = {
+        -- Tier 1: Basic Security (default tier)
+        [1] = {
+            label = 'Basic Security',
+            requiredItem = 'security_chip_1',
+            itemCount = 1,
+            duration = 30000, -- 30 seconds
+            nextTier = 2,
+        },
+        -- Tier 2: Advanced Security
+        [2] = {
+            label = 'Advanced Security',
+            requiredItem = 'security_chip_2',
+            itemCount = 1,
+            duration = 35000, -- 35 seconds
+            nextTier = 3,
+        },
+        -- Tier 3: Expert Security
+        [3] = {
+            label = 'Expert Security',
+            requiredItem = 'security_chip_3',
+            itemCount = 1,
+            duration = 40000, -- 40 seconds
+            nextTier = nil, -- No upgrade after this tier
+        },
+    }
 }
 
 return Config

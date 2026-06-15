@@ -1,118 +1,110 @@
 local Theft = {}
+local Config = require 'config.shared'
 local Utils = require 'modules.utils.server'
+local SECURITY_TIER_KEY = 'p_vehiclekeys:securityTier'
 
--- Server event to unlock vehicle after successful lockpick
-RegisterNetEvent('p_vehiclekeys/server/theft/unlock', function(netId)
-    local _source = source
-    
-    if not netId or netId == 0 then
-        return
-    end
+local function initializeDatabase()
+    MySQL.query.await([[
+        CREATE TABLE IF NOT EXISTS vehicle_security_tiers (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            plate VARCHAR(20) NOT NULL UNIQUE,
+            security_tier INT DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_security_tier (security_tier)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    ]])
+end
+
+local function getVehicleSecurityTierDB(plate)
+    return MySQL.scalar.await('SELECT security_tier FROM vehicle_security_tiers WHERE plate = ?', {plate}) or 1
+end
+
+local function setVehicleSecurityTierDB(plate, tier)
+    MySQL.insert.await(
+        'INSERT INTO vehicle_security_tiers (plate, security_tier) VALUES (?, ?) ON DUPLICATE KEY UPDATE security_tier = VALUES(security_tier)',
+        {plate, tier}
+    )
+end
+
+local function getValidatedVehicle(playerId, netId, maxDistance)
+    if not netId or netId == 0 then return end
 
     local entity = NetworkGetEntityFromNetworkId(netId)
-    if not entity or entity == 0 then
-        return
-    end
+    if not entity or entity == 0 then return end
 
-    -- Verify player is near the vehicle
-    local playerPed = GetPlayerPed(_source)
-    local playerCoords = GetEntityCoords(playerPed)
-    local vehicleCoords = GetEntityCoords(entity)
-    
-    if #(playerCoords - vehicleCoords) > 5.0 then
-        return -- Player too far from vehicle
-    end
+    local plyCoords = GetEntityCoords(GetPlayerPed(playerId))
+    if #(plyCoords - GetEntityCoords(entity)) > maxDistance then return end
 
-    -- Unlock the vehicle for all nearby players
-    local players = lib.getNearbyPlayers(vehicleCoords, 50.0)
-    
+    return entity
+end
+
+RegisterNetEvent('p_vehiclekeys/server/theft/unlock', function(netId)
+    local _source = source
+    local entity = getValidatedVehicle(_source, netId, 5.0)
+    if not entity then return end
+
+    local players = lib.getNearbyPlayers(GetEntityCoords(entity), 50.0)
     for _, player in ipairs(players) do
         TriggerClientEvent('p_vehiclekeys/client/locks/toggle', player.id, netId, true)
     end
-    
-    -- Also trigger for the source player
-    TriggerClientEvent('p_vehiclekeys/client/locks/toggle', _source, netId, true)
-    
-    -- Log the theft attempt (optional)
-    local vehPlate = Utils:trim(GetVehicleNumberPlateText(entity))
-    print(string.format('[p_vehiclekeys] Player %s (%s) successfully lockpicked vehicle with plate: %s', 
-        GetPlayerName(_source), _source, vehPlate))
 end)
 
--- Server event to remove lockpick on failure
-RegisterNetEvent('p_vehiclekeys/server/theft/removeLockpick', function()
+RegisterNetEvent('p_vehiclekeys/server/theft/upgradeSecurity', function(netId)
     local _source = source
-    
-    -- Remove lockpick item from player inventory
-    Bridge.Inventory.removeItem(_source, 'lockpick', 1)
+    if not Config.SecurityUpgrade.enabled then return end
+
+    local entity = getValidatedVehicle(_source, netId, 5.0)
+    if not entity then return end
+
+    local job = Bridge.Framework.getPlayerJob(_source)
+    if job?.name ~= Config.SecurityUpgrade.requiredJob then
+        return Bridge.Notify.showNotify(_source, locale('upgrade_wrong_job'), 'error')
+    end
+
+    local plate = Utils:trim(GetVehicleNumberPlateText(entity))
+    local currentTier = Entity(entity).state[SECURITY_TIER_KEY] or getVehicleSecurityTierDB(plate)
+    local nextTier = currentTier + 1
+    local upgradeConfig = Config.SecurityUpgrade.upgrades[nextTier]
+    if not upgradeConfig then
+        return Bridge.Notify.showNotify(_source, locale('upgrade_already_maxed'), 'error')
+    end
+
+    if Bridge.Inventory.getItemCount(_source, upgradeConfig.requiredItem) < upgradeConfig.itemCount then
+        return Bridge.Notify.showNotify(_source, locale('upgrade_failed'), 'error')
+    end
+
+    Bridge.Inventory.removeItem(_source, upgradeConfig.requiredItem, upgradeConfig.itemCount)
+    setVehicleSecurityTierDB(plate, nextTier)
+    Entity(entity).state:set(SECURITY_TIER_KEY, nextTier, true)
+
+    Bridge.Notify.showNotify(_source, locale('upgrade_success'), 'success')
 end)
 
--- Server event to alert police
-RegisterNetEvent('p_vehiclekeys/server/theft/alertPolice', function(coords)
-    local _source = source
-    
-    -- Verify coords are valid
-    if not coords or type(coords) ~= 'vector3' then
-        local playerPed = GetPlayerPed(_source)
-        coords = GetEntityCoords(playerPed)
+function Theft:getVehicleSecurityTier(entity)
+    if not entity or entity == 0 then
+        return 1
     end
-    
-    -- Get street name for dispatch
-    local streetHash, crossingHash = GetStreetNameAtCoord(coords.x, coords.y, coords.z)
-    local streetName = GetStreetNameFromHashKey(streetHash)
-    
-    -- Trigger dispatch event (compatible with various dispatch systems)
-    -- ps-dispatch
-    if GetResourceState('ps-dispatch') == 'started' then
-        TriggerClientEvent('ps-dispatch:client:VehicleTheft', -1, coords)
-    end
-    
-    -- cd_dispatch
-    if GetResourceState('cd_dispatch') == 'started' then
-        TriggerEvent('cd_dispatch:AddNotification', {
-            job_table = {'police', 'sheriff'},
-            coords = coords,
-            title = 'Vehicle Theft',
-            message = 'Attempted vehicle break-in at ' .. streetName,
-            flash = 1,
-            unique_id = tostring(math.random(0, 99999)),
-            sound = 1,
-            blip = {
-                sprite = 595,
-                scale = 1.2,
-                colour = 1,
-                flashes = true,
-                text = 'Vehicle Theft',
-                time = 5,
-                radius = 0,
-            }
-        })
-    end
-    
-    -- qs-dispatch
-    if GetResourceState('qs-dispatch') == 'started' then
-        TriggerEvent('qs-dispatch:server:CreateDispatch', {
-            job = {'police'},
-            callLocation = coords,
-            message = 'Vehicle Theft in Progress',
-            flashes = true,
-            sprite = 595,
-            color = 1,
-            scale = 1.2,
-            length = 3,
-        })
-    end
-    
-    -- Generic alert for police job (works with most frameworks)
-    local players = GetPlayers()
-    for _, playerId in ipairs(players) do
-        local playerJob = Bridge.Framework.getJob(playerId)
-        if playerJob and (playerJob.name == 'police' or playerJob.name == 'sheriff' or playerJob.name == 'lspd') then
-            TriggerClientEvent('p_vehiclekeys/client/theft/policeAlert', playerId, coords, streetName)
+
+    return Entity(entity).state[SECURITY_TIER_KEY] or 1
+end
+
+lib.callback.register('p_vehiclekeys:getVehicleSecurityTier', function(source, plate)
+    return getVehicleSecurityTierDB(plate)
+end)
+
+Citizen.CreateThread(function()
+    if Config.Theft.enabled then
+        while not Bridge?.Framework?.registerItem do
+            Citizen.Wait(100)
         end
+        
+        Bridge.Framework.registerItem(Config.Theft.requiredItem, function(source)
+            TriggerClientEvent('p_vehiclekeys/client/theft/useLockpick', source)
+        end)
     end
-    
-    print(string.format('[p_vehiclekeys] Vehicle theft alert triggered at %s by player %s', streetName, _source))
 end)
+
+initializeDatabase()
 
 return Theft

@@ -128,3 +128,5 @@ if Config.Settings.keepSteeringWheel then
         end
     end)
 end
+
+return Engine

@@ -1,18 +1,100 @@
 local Theft = {}
 local Config = require 'config.shared'
 local Utils = require 'modules.utils.client'
+local DIFFICULTY_ORDER = {'easy', 'medium', 'hard', 'expert'}
+local SECURITY_TIER_KEY = 'p_vehiclekeys:securityTier'
+
 Theft.isLockpicking = false
 Theft.isHotwiring = false
 Theft.antiSpam = 0
-Theft.currentDifficulty = nil
+Theft.targetVehicle = nil
 Theft.hasWeapon = false
+Theft.robbedPeds = {}
 
-function Theft:getDifficulty(vehicle)
-    local vehicleClass = GetVehicleClass(vehicle)
-    return Config.Theft.vehicleClassDifficulty[vehicleClass] or 'medium'
+function Theft:reset()
+    self.isLockpicking = false
+    self.isHotwiring = false
+    self.targetVehicle = nil
 end
 
-function Theft:canLockpick()
+function Theft:alertPolice()
+    if not Config.Theft.alertPolice or math.random(1, 100) > Config.Theft.policeAlertChance then
+        return
+    end
+
+    Bridge.Dispatch.SendAlert({
+        title = locale('car_theft'),
+        code = '10-90',
+        icon = 'fa-solid fa-car',
+        blip = {scale = 1.1, sprite = 225, color = 3, name = locale('car_theft')},
+        priority = 'medium',
+        maxOfficers = 3,
+        time = 5,
+        notify = 4000
+    })
+end
+
+function Theft:playBreakInAnim()
+    local animDict = lib.requestAnimDict('veh@break_in@0h@p_m_one@')
+    TaskPlayAnim(cache.ped, animDict, 'low_force_entry_ds', 3.0, 3.0, -1, 17, 0, false, false, false)
+    RemoveAnimDict(animDict)
+end
+
+RegisterCommand('breakin', function()
+    DisplayRadar(false)
+    Theft:playBreakInAnim()
+end)
+
+function Theft:getSecurityTier(vehicle)
+    if not vehicle or not DoesEntityExist(vehicle) then
+        return 1
+    end
+
+    local state = Entity(vehicle).state[SECURITY_TIER_KEY]
+    if state then
+        return state
+    end
+
+    local plate = Utils:trim(GetVehicleNumberPlateText(vehicle))
+    if plate and plate ~= '' then
+        local tier = lib.callback.await('p_vehiclekeys:getVehicleSecurityTier', false, plate)
+        if tier then
+            return tier
+        end
+    end
+
+    return 1
+end
+
+function Theft:getDifficulty(vehicle)
+    local baseDifficulty = Config.Theft.vehicleClassDifficulty[GetVehicleClass(vehicle)] or 'medium'
+    local currentIndex = 1
+    for i, diff in ipairs(DIFFICULTY_ORDER) do
+        if diff == baseDifficulty then
+            currentIndex = i
+            break
+        end
+    end
+
+    local newIndex = math.min(currentIndex + self:getSecurityTier(vehicle) - 1, #DIFFICULTY_ORDER)
+    return DIFFICULTY_ORDER[newIndex]
+end
+
+function Theft:requiresJammer(vehicle)
+    local difficulty = self:getDifficulty(vehicle)
+    if difficulty == 'expert' then
+        return true
+    end
+
+    local tier = self:getSecurityTier(vehicle)
+    return tier >= 3 or (tier >= 2 and difficulty == 'hard')
+end
+
+function Theft:canLockpick(vehicle)
+    if not Config.Theft.canAttempt(vehicle) then
+        return false
+    end
+
     if self.isLockpicking then
         return false
     end
@@ -22,9 +104,19 @@ function Theft:canLockpick()
         return false
     end
 
-    local itemCount = Bridge.Inventory.getItemCount(Config.Theft.requiredItem)
-    if itemCount < 1 then
+    if Bridge.Inventory.getItemCount('lockpick') < 1 then
         Bridge.Notify.showNotify(locale('no_lockpick'), 'error')
+        return false
+    end
+
+    if self:requiresJammer(vehicle) and Bridge.Inventory.getItemCount('signal_jammer') < 1 then
+        Bridge.Notify.showNotify(locale('you_need_signal_jammer'), 'error')
+        return false
+    end
+
+    local vehModel = string.lower(GetDisplayNameFromVehicleModel(GetEntityModel(vehicle)))
+    if Config.Theft.blacklistedModels[vehModel] then
+        Bridge.Notify.showNotify(locale('you_cannot_lockpick'), 'error')
         return false
     end
 
@@ -32,32 +124,23 @@ function Theft:canLockpick()
 end
 
 function Theft:startLockpick(vehicle)
-    if not self:canLockpick() then return end
+    if not self:canLockpick(vehicle) then return end
     if not vehicle or not DoesEntityExist(vehicle) then return end
 
-    local lockStatus = GetVehicleDoorLockStatus(vehicle)
-    if lockStatus <= 1 then
+    if GetVehicleDoorLockStatus(vehicle) <= 1 then
         Bridge.Notify.showNotify(locale('vehicle_already_unlocked'), 'info')
         return
     end
 
-    self.isLockpicking = true
-    self.antiSpam = GetGameTimer() + (Config.Theft.lockpickCooldown * 1000)
-    
-    local difficulty = self:getDifficulty(vehicle)
-    self.currentDifficulty = difficulty
-    local difficultyData = Config.Theft.difficulties[difficulty]
 
-    local animDict = lib.requestAnimDict('veh@break_in@0h@p_m_one@')
-    TaskPlayAnim(cache.ped, animDict, 'low_force_entry_ds', 3.0, 3.0, -1, 17, 0, false, false, false)
-    RemoveAnimDict(animDict)
+    local difficulty = self:getDifficulty(vehicle)
+    self.isLockpicking = true
+    self.antiSpam = GetGameTimer() + Config.Theft.cooldown
+    self.targetVehicle = vehicle
+    self:playBreakInAnim()
 
     if difficulty == 'expert' then
-        SendNUIMessage({
-            action = 'setVisibleJammer',
-            data = true
-        })
-        
+        SendNUIMessage({action = 'setVisibleJammer', data = true})
         SendNUIMessage({
             action = 'startJammer',
             data = {
@@ -65,17 +148,12 @@ function Theft:startLockpick(vehicle)
                 timeLimit = 25000
             }
         })
-        
         SetNuiFocus(true, true)
-        self.targetVehicle = vehicle
         return
     end
 
-    SendNUIMessage({
-        action = 'setVisibleLockpick',
-        data = true
-    })
-
+    local difficultyData = Config.Theft.difficulties[difficulty]
+    SendNUIMessage({action = 'setVisibleLockpick', data = true})
     SendNUIMessage({
         action = 'startLockpick',
         data = {
@@ -84,72 +162,53 @@ function Theft:startLockpick(vehicle)
             timeLimit = difficultyData.timeLimit
         }
     })
-
     SetNuiFocus(true, true)
-    self.targetVehicle = vehicle
 end
 
 RegisterNUICallback('lockpickResult', function(data, cb)
     cb(1)
     SetNuiFocus(false, false)
     ClearPedTasks(cache.ped)
-    
+
     if data.success then
         if Theft.targetVehicle and DoesEntityExist(Theft.targetVehicle) then
             local netId = NetworkGetNetworkIdFromEntity(Theft.targetVehicle)
-            TriggerServerEvent('p_vehiclekeys/server/theft/unlockOnly', netId)
+            TriggerServerEvent('p_vehiclekeys/server/theft/unlock', netId)
             Bridge.Notify.showNotify(locale('lockpick_success'), 'success')
         end
     else
         if data.reason == 'broken' then
             Bridge.Notify.showNotify(locale('lockpick_broken'), 'error')
             if Config.Theft.removeItemOnFail then
-                TriggerServerEvent('p_bridge/server/removeItem', Config.Theft.requiredItem, 1)
+                TriggerServerEvent('p_bridge/server/removeItem', 'lockpick', 1)
             end
         elseif data.reason == 'timeout' then
             Bridge.Notify.showNotify(locale('lockpick_timeout'), 'error')
         end
-        
-        if Config.Theft.alertPolice and data.reason ~= 'cancelled' then
-            if math.random(100) <= Config.Theft.policeAlertChance then
-                local coords = GetEntityCoords(cache.ped)
-                TriggerServerEvent('p_vehiclekeys/server/theft/alertPolice', coords)
-            end
+
+        if data.reason ~= 'cancelled' then
+            Theft:alertPolice()
         end
     end
-    
+
     Wait(1500)
-    SendNUIMessage({
-        action = 'setVisibleLockpick',
-        data = false
-    })
-    
-    Theft.isLockpicking = false
-    Theft.targetVehicle = nil
-    Theft.currentDifficulty = nil
+    SendNUIMessage({action = 'setVisibleLockpick', data = false})
+    Theft:reset()
 end)
 
 RegisterNUICallback('jammerResult', function(data, cb)
     cb(1)
-    
+
     if data.success then
+        TriggerServerEvent('p_bridge/server/removeItem', 'signal_jammer', 1)
         Bridge.Notify.showNotify(locale('jammer_success'), 'success')
         Wait(500)
-        SendNUIMessage({
-            action = 'setVisibleJammer',
-            data = false
-        })
+        SendNUIMessage({action = 'setVisibleJammer', data = false})
         Wait(300)
+
+        Theft:playBreakInAnim()
         local difficultyData = Config.Theft.difficulties['expert']
-        local animDict = lib.requestAnimDict('veh@break_in@0h@p_m_one@')
-        TaskPlayAnim(cache.ped, animDict, 'low_force_entry_ds', 3.0, 3.0, -1, 17, 0, false, false, false)
-        RemoveAnimDict(animDict)
-        
-        SendNUIMessage({
-            action = 'setVisibleLockpick',
-            data = true
-        })
-        
+        SendNUIMessage({action = 'setVisibleLockpick', data = true})
         SendNUIMessage({
             action = 'startLockpick',
             data = {
@@ -158,48 +217,28 @@ RegisterNUICallback('jammerResult', function(data, cb)
                 timeLimit = difficultyData.timeLimit
             }
         })
-        
         SetNuiFocus(true, true)
-    else
-        SetNuiFocus(false, false)
-        ClearPedTasks(cache.ped)
-        
-        if data.reason == 'timeout' then
-            Bridge.Notify.showNotify(locale('jammer_timeout'), 'error')
-        else
-            Bridge.Notify.showNotify(locale('jammer_failed'), 'error')
-        end
-        
-        if Config.Theft.alertPolice then
-            if math.random(100) <= Config.Theft.policeAlertChance then
-                local coords = GetEntityCoords(cache.ped)
-                TriggerServerEvent('p_vehiclekeys/server/theft/alertPolice', coords)
-            end
-        end
-        
-        Wait(1500)
-        SendNUIMessage({
-            action = 'setVisibleJammer',
-            data = false
-        })
-        
-        Theft.isLockpicking = false
-        Theft.targetVehicle = nil
-        Theft.currentDifficulty = nil
+        return
     end
+
+    SetNuiFocus(false, false)
+    ClearPedTasks(cache.ped)
+    Bridge.Notify.showNotify(locale(data.reason == 'timeout' and 'jammer_timeout' or 'jammer_failed'), 'error')
+    Theft:alertPolice()
+
+    Wait(1500)
+    SendNUIMessage({action = 'setVisibleJammer', data = false})
+    Theft:reset()
 end)
 
 RegisterNUICallback('hotwireResult', function(data, cb)
     cb(1)
     SetNuiFocus(false, false)
-    
+
     if data.success then
         if Theft.targetVehicle and DoesEntityExist(Theft.targetVehicle) then
             local netId = NetworkGetNetworkIdFromEntity(Theft.targetVehicle)
-            TriggerServerEvent('p_vehiclekeys/server/theft/hotwire', netId)
             Bridge.Notify.showNotify(locale('hotwire_success'), 'success')
-            
-            -- Start the engine
             SetVehicleEngineOn(Theft.targetVehicle, true, false, true)
         end
     else
@@ -210,55 +249,45 @@ RegisterNUICallback('hotwireResult', function(data, cb)
         else
             Bridge.Notify.showNotify(locale('hotwire_failed'), 'error')
         end
-        
-        if Config.Theft.alertPolice and data.reason ~= 'cancelled' then
-            if math.random(100) <= Config.Theft.policeAlertChance then
-                local coords = GetEntityCoords(cache.ped)
-                TriggerServerEvent('p_vehiclekeys/server/theft/alertPolice', coords)
-            end
+
+        if data.reason ~= 'cancelled' then
+            Theft:alertPolice()
         end
     end
-    
-    Wait(1500)
-    SendNUIMessage({
-        action = 'setVisibleHotwire',
-        data = false
-    })
-    
-    Theft.isHotwiring = false
-    Theft.targetVehicle = nil
-    Theft.currentDifficulty = nil
-end)
 
-RegisterNUICallback('hideFrame', function(data, cb)
-    cb('ok')
-    SetNuiFocus(false, false)
-    ClearPedTasks(cache.ped)
-    Theft.isLockpicking = false
-    Theft.isHotwiring = false
-    Theft.targetVehicle = nil
-    Theft.currentDifficulty = nil
-    
-    SendNUIMessage({
-        action = data.name,
-        data = false
-    })
+    Wait(1500)
+    SendNUIMessage({action = 'setVisibleHotwire', data = false})
+    Theft:reset()
 end)
 
 function Theft:canHotwire(vehicle)
-    if self.isHotwiring then
-        return false
-    end
-    
-    if self.isLockpicking then
+    if self.isHotwiring or self.isLockpicking then
         return false
     end
 
-    if not Config.Theft.canAttempt(vehicle) then
+    
+    if self.antiSpam > GetGameTimer() then
+        Bridge.Notify.showNotify(locale('lockpick_cooldown'), 'error')
         return false
     end
-    
-    return true
+
+    if Bridge.Inventory.getItemCount('lockpick') < 1 then
+        Bridge.Notify.showNotify(locale('no_lockpick'), 'error')
+        return false
+    end
+
+    if self:requiresJammer(vehicle) and Bridge.Inventory.getItemCount('signal_jammer') < 1 then
+        Bridge.Notify.showNotify(locale('you_need_signal_jammer'), 'error')
+        return false
+    end
+
+    local vehModel = string.lower(GetDisplayNameFromVehicleModel(GetEntityModel(vehicle)))
+    if Config.Theft.blacklistedModels[vehModel] then
+        Bridge.Notify.showNotify(locale('you_cannot_lockpick'), 'error')
+        return false
+    end 
+
+    return Config.Theft.canAttempt(vehicle)
 end
 
 function Theft:startHotwire(vehicle)
@@ -272,34 +301,26 @@ function Theft:startHotwire(vehicle)
         Bridge.Notify.showNotify(locale('must_be_in_vehicle'), 'error')
         return
     end
-    
+
     if GetIsVehicleEngineRunning(vehicle) then
         Bridge.Notify.showNotify(locale('engine_already_running'), 'info')
         return
     end
 
     if not self:canHotwire(vehicle) then return end
-    
+
     self.isHotwiring = true
     self.targetVehicle = vehicle
-    
+
     local difficulty = self:getDifficulty(vehicle)
-    self.currentDifficulty = difficulty
-    local hotwireTime = Config.Theft.hotwireTimes[difficulty] or 25000
-    
-    SendNUIMessage({
-        action = 'setVisibleHotwire',
-        data = true
-    })
-    
+    SendNUIMessage({action = 'setVisibleHotwire', data = true})
     SendNUIMessage({
         action = 'startHotwire',
         data = {
             difficulty = difficulty,
-            timeLimit = hotwireTime
+            timeLimit = Config.Theft.hotwireTimes[difficulty] or 25000
         }
     })
-    
     SetNuiFocus(true, true)
 end
 
@@ -319,6 +340,65 @@ RegisterCommand('hotwire', function()
     Theft:startHotwire()
 end)
 
+function Theft:canUpgradeSecurity(vehicle)
+    if not Config.SecurityUpgrade.enabled then
+        return false
+    end
+
+    local upgradeConfig = Config.SecurityUpgrade.upgrades[self:getSecurityTier(vehicle) + 1]
+    if not upgradeConfig then
+        return false
+    end
+
+    local plyJob = Bridge.Framework.fetchPlayerJob()
+    if not Config.SecurityUpgrade.requiredJob or not lib.table.contains(Config.SecurityUpgrade.requiredJob, plyJob?.name) then
+        return false
+    end
+
+    return Bridge.Inventory.getItemCount(upgradeConfig.requiredItem) >= upgradeConfig.itemCount
+end
+
+function Theft:upgradeSecurity(vehicle)
+    if not vehicle or not DoesEntityExist(vehicle) then
+        return
+    end
+
+    if not Config.SecurityUpgrade.enabled then
+        return
+    end
+
+    local upgradeConfig = Config.SecurityUpgrade.upgrades[self:getSecurityTier(vehicle) + 1]
+    if not upgradeConfig then
+        Bridge.Notify.showNotify(locale('upgrade_already_maxed'), 'info')
+        return
+    end
+
+    local plyJob = Bridge.Framework.fetchPlayerJob()
+    if not Config.SecurityUpgrade.requiredJob or not lib.table.contains(Config.SecurityUpgrade.requiredJob, plyJob?.name) then
+        Bridge.Notify.showNotify(locale('upgrade_job_required'), 'error')
+        return
+    end
+
+    if Bridge.Inventory.getItemCount(upgradeConfig.requiredItem) < upgradeConfig.itemCount then
+        Bridge.Notify.showNotify(string.format(locale('upgrade_missing_item'), upgradeConfig.requiredItem), 'error')
+        return
+    end
+
+    if Bridge.Progress.Start({
+        duration = upgradeConfig.duration,
+        label = locale('upgrading_security'),
+        useWhileDead = false,
+        canCancel = true,
+        anim = {
+            dict = 'missmechanic',
+            clip = 'work2_base',
+            flag = 1,
+        },
+    }) then
+        TriggerServerEvent('p_vehiclekeys/server/theft/upgradeSecurity', NetworkGetNetworkIdFromEntity(vehicle))
+    end
+end
+
 Bridge.Target.addVehicle({
     {
         name = 'lockpick_vehicle',
@@ -326,12 +406,25 @@ Bridge.Target.addVehicle({
         label = locale('lockpick_vehicle'),
         distance = 2.0,
         canInteract = function(entity)
-            local lockStatus = GetVehicleDoorLockStatus(entity)
-            return lockStatus >= 2
+            return GetVehicleDoorLockStatus(entity) >= 2
         end,
         onSelect = function(data)
             local entity = type(data) == 'number' and data or data.entity
             Theft:startLockpick(entity)
+        end
+    },
+    {
+        name = 'upgrade_security_vehicle',
+        icon = 'fas fa-shield',
+        label = locale('upgrade_security'),
+        distance = 2.0,
+        groups = Config.SecurityUpgrade.requiredJob,
+        canInteract = function(entity)
+            return Theft:canUpgradeSecurity(entity)
+        end,
+        onSelect = function(data)
+            local entity = type(data) == 'number' and data or data.entity
+            Theft:upgradeSecurity(entity)
         end
     }
 })
@@ -340,13 +433,29 @@ function Theft:weaponThread()
     self.hasWeapon = true
     Citizen.CreateThread(function()
         while self.hasWeapon do
-            local sleep = 2000
+            local sleep = 1500
             if not cache.vehicle and IsPlayerFreeAiming(cache.playerId) then
                 sleep = 500
                 local plyCoords = GetEntityCoords(cache.ped)
                 local ped, coords = lib.getClosestPed(plyCoords, 10.0)
-                if ped and ped ~= 0 and not IsPedAPlayer(ped) and not IsPedDeadOrDying(ped) and IsPlayerFreeAimingAtEntity(cache.playerId, ped) then
-                    
+                if ped and ped ~= 0 and not self.robbedPeds[ped] and not IsPedAPlayer(ped) and IsPedInAnyVehicle(ped, false)
+                and not IsPedDeadOrDying(ped) and IsPlayerFreeAimingAtEntity(cache.playerId, ped) then
+                    local vehicle = GetVehiclePedIsIn(ped, false)
+                    if GetEntitySpeed(vehicle) < 5 then
+                        self.robbedPeds[ped] = true
+                        ClearPedTasks(ped)
+                        Citizen.Wait(100)
+                        TaskSetBlockingOfNonTemporaryEvents(ped, true)
+                        Citizen.Wait(400)
+                        TaskHandsUp(ped, -1, true, -1, true)
+                        Citizen.Wait(2500)
+                        TaskLeaveVehicle(ped, vehicle, 256)
+                        Citizen.Wait(500)
+                        TaskSmartFleePed(ped, cache.ped, 50.0, -1)
+                        local vehPlate = Utils:trim(GetVehicleNumberPlateText(vehicle))
+                        TriggerServerEvent('p_vehiclekeys/createKey', vehPlate, NetworkGetNetworkIdFromEntity(vehicle))
+                        Bridge.Notify.showNotify(locale('theft_key_obtained'), 'success')
+                    end
                 end
             end
             Citizen.Wait(sleep)
@@ -359,6 +468,17 @@ lib.onCache('weapon', function(value)
         Theft:weaponThread()
     else
         Theft.hasWeapon = false
+    end
+end)
+
+RegisterNetEvent('p_vehiclekeys/client/theft/useLockpick', function()
+    if cache.vehicle and cache.vehicle ~= 0 then
+        Theft:startHotwire()
+    else
+        local closestVeh, _ = lib.getClosestVehicle(GetEntityCoords(cache.ped), 4.0, true)
+        if closestVeh and closestVeh ~= 0 then
+            Theft:startLockpick(closestVeh)
+        end
     end
 end)
 

@@ -9,6 +9,9 @@ import Hotwire from './components/Hotwire';
 import '@mantine/core/styles.css';
 import './index.css';
 import { isEnvBrowser } from './utils/misc';
+import { loadLocales } from './utils/locales';
+
+loadLocales();
 
 const root = document.querySelector('body');
 
@@ -28,9 +31,15 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <VisibilityProvider componentName='App'>
         <App />
       </VisibilityProvider>
-      <Lockpick />
-      <Jammer />
-      <Hotwire />
+      <VisibilityProvider componentName='Lockpick'>
+        <Lockpick />
+      </VisibilityProvider>
+      <VisibilityProvider componentName='Jammer'>
+        <Jammer />
+      </VisibilityProvider>
+      <VisibilityProvider componentName='Hotwire'>
+        <Hotwire />
+      </VisibilityProvider>
     </MantineProvider>
   </React.StrictMode>,
 );

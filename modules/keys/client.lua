@@ -1,29 +1,21 @@
 local Keys = {}
 local Utils = require 'modules.utils.client'
 
-function Keys:createKey(plate, entity)
-    if not plate or plate == '' then
-        return
-    end
-    
-    if not entity or entity == 0 or not NetworkGetEntityIsNetworked(entity) then
-        return
-    end
+local function getVehicleNetId(plate, entity)
+    if not plate or plate == '' then return end
+    if not entity or entity == 0 or not NetworkGetEntityIsNetworked(entity) then return end
+    return NetworkGetNetworkIdFromEntity(entity)
+end
 
-    local netId = NetworkGetNetworkIdFromEntity(entity)
+function Keys:createKey(plate, entity)
+    local netId = getVehicleNetId(plate, entity)
+    if not netId then return end
     TriggerServerEvent('p_vehiclekeys/createKey', plate, netId)
 end
 
 function Keys:removeKey(plate, entity, removeAll)
-    if not plate or plate == '' then
-        return
-    end
-    
-    if not entity or entity == 0 or not NetworkGetEntityIsNetworked(entity) then
-        return
-    end
-
-    local netId = NetworkGetNetworkIdFromEntity(entity)
+    local netId = getVehicleNetId(plate, entity)
+    if not netId then return end
     TriggerServerEvent('p_vehiclekeys/removeKey', plate, netId, removeAll)
 end
 
@@ -35,14 +27,14 @@ exports('removeKey', function(plate, entity, removeAll)
     Keys:removeKey(plate, entity, removeAll)
 end)
 
-if true then -- enable debug mode in p_bridge config if you want to use it
-    lib.print.info('[Keys] Module loaded')
+if Bridge?.Config?.Debug then
     RegisterCommand('spawnKeys', function()
         if not cache.vehicle or cache.vehicle == 0 then
             return lib.print.info('You must be in a vehicle to spawn keys')
         end
 
-        local plate = Utils:trim(GetVehicleNumberPlateText(cache.vehicle))
-        Keys:createKey(plate, cache.vehicle)
+        Keys:createKey(Utils:trim(GetVehicleNumberPlateText(cache.vehicle)), cache.vehicle)
     end, false)
 end
+
+return Keys

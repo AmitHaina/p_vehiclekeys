@@ -2,26 +2,24 @@ local Utils = {}
 
 lib.locale(Bridge?.Config?.Language or 'en')
 
-function Utils:exportHandler(resourceName, exportName, func)
-    AddEventHandler(('__cfx_export_%s_%s'):format(resourceName, exportName), function(setCB)
-        setCB(func)
-    end)
-end
+RegisterNUICallback('getLocales', function(_, cb)
+    cb(lib.getLocales())
+end)
 
 function Utils:trim(str)
-    if not str or type(str) ~= 'string' then return str end
+    if type(str) ~= 'string' then return str end
     return str:match('^%s*(.-)%s*$')
 end
 
 function Utils:getVehicleByPlate(plate)
+    plate = Utils:trim(plate)
     if not plate or plate == '' then
         return nil
     end
 
     local vehicles = lib.getNearbyVehicles(GetEntityCoords(cache.ped), 25.0, true)
-    for k, v in ipairs(vehicles) do
-        local vehPlate = Utils:trim(GetVehicleNumberPlateText(v.vehicle))
-        if vehPlate == plate then
+    for _, v in ipairs(vehicles) do
+        if Utils:trim(GetVehicleNumberPlateText(v.vehicle)) == plate then
             return v.vehicle
         end
     end
@@ -29,9 +27,22 @@ function Utils:getVehicleByPlate(plate)
     return nil
 end
 
+function Utils:requestControl(entity)
+    if not DoesEntityExist(entity) then return false end
+    if not NetworkGetEntityIsNetworked(entity) then return true end
+    if NetworkHasControlOfEntity(entity) then return true end
+
+    local timeout = GetGameTimer() + 1000
+    repeat
+        NetworkRequestControlOfEntity(entity)
+        Citizen.Wait(0)
+    until NetworkHasControlOfEntity(entity) or GetGameTimer() > timeout
+
+    return NetworkHasControlOfEntity(entity)
+end
+
 function Utils:toggleTrunk(vehicle)
-    local doorRatio = GetVehicleDoorAngleRatio(vehicle, 5)
-    if doorRatio > 0.0 then
+    if GetVehicleDoorAngleRatio(vehicle, 5) > 0.0 then
         SetVehicleDoorShut(vehicle, 5, false)
     else
         SetVehicleDoorOpen(vehicle, 5, false, false)

@@ -1,14 +1,8 @@
 local Locks = {}
+local Config = require 'config.shared'
 local Utils = require 'modules.utils.server'
 
 function Locks:toggleLock(playerId, netId, state, requireKey)
-    local _source = playerId
-    if requireKey then
-        if not _source or _source < 1 then
-            return
-        end
-    end
-
     if not netId or netId == 0 then
         return
     end
@@ -19,45 +13,73 @@ function Locks:toggleLock(playerId, netId, state, requireKey)
     end
 
     if requireKey then
+        if not playerId or playerId < 1 then
+            return
+        end
+
+        local plyCoords = GetEntityCoords(GetPlayerPed(playerId))
+        if #(plyCoords - GetEntityCoords(entity)) > 50.0 then
+            return
+        end
+
         local vehPlate = Utils:trim(GetVehicleNumberPlateText(entity))
-        local itemCount = Bridge.Inventory.getItemCount(_source, 'car_key', {plate = vehPlate})
-        if itemCount < 1 then
+        if Bridge.Inventory.getItemCount(playerId, 'car_key', {plate = vehPlate}) < 1 then
             return
         end
     end
 
-    local ownerId = NetworkGetEntityOwner(entity)
-    local coords = GetEntityCoords(entity)
-    local players = lib.getNearbyPlayers(coords, 20.0)
-
+    local notified = {}
     if playerId then
-        print('Player ' .. playerId .. ' toggled lock for vehicle ' .. netId .. ' to state ' .. tostring(state))
-        TriggerClientEvent('p_vehiclekeys/client/locks/toggle', playerId, netId, state, true)
+        notified[playerId] = true
+        TriggerClientEvent('p_vehiclekeys/client/locks/toggle', playerId, netId, state, requireKey and true or false)
     end
-    
-    if ownerId and (not playerId or ownerId ~= playerId) then
+
+    local ownerId = NetworkGetEntityOwner(entity)
+    if ownerId and ownerId > 0 and not notified[ownerId] then
+        notified[ownerId] = true
         TriggerClientEvent('p_vehiclekeys/client/locks/toggle', ownerId, netId, state)
     end
 
-    for _, player in ipairs(players) do
-        if player.id ~= ownerId then
-            if playerId and player.id == playerId then
-                goto skip
-            end
-
+    for _, player in ipairs(lib.getNearbyPlayers(GetEntityCoords(entity), 20.0)) do
+        if not notified[player.id] then
+            notified[player.id] = true
             TriggerClientEvent('p_vehiclekeys/client/locks/toggle', player.id, netId, state)
-
-            ::skip::
         end
     end
 end
 
+-- Key ownership is always enforced for client requests; trusted callers go through the export
 RegisterNetEvent('p_vehiclekeys/server/locks/toggle', function(netId, state)
-    local _source = source
-    Locks:toggleLock(_source, netId, state, true)
+    Locks:toggleLock(source, netId, state, true)
 end)
 
+RegisterNetEvent('p_vehiclekeys/server/locks/unlockTool', function(netId)
+    local _source = source
+    if not netId or netId == 0 then
+        return
+    end
+
+    local entity = NetworkGetEntityFromNetworkId(netId)
+    if not entity or entity == 0 then
+        return
+    end
+
+    local plyCoords = GetEntityCoords(GetPlayerPed(_source))
+    if #(plyCoords - GetEntityCoords(entity)) > 10.0 then
+        return
+    end
+
+    local job = Bridge.Framework.getPlayerJob(_source)
+    if not lib.table.contains(Config.Locks.unlockToolJobs, job) then
+        return
+    end
+
+    Locks:toggleLock(_source, netId, true, false)
+end)
+
+-- If playerId is nil, key ownership is not checked
 exports('changeLockState', function(playerId, netId, state)
-    -- if playerId is nil, script will not check for keys
     Locks:toggleLock(playerId, netId, state, playerId and true or false)
 end)
+
+return Locks

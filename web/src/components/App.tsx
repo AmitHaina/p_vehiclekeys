@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import {
     Box, Transition, Text, Paper, ActionIcon, Group, Stack, Tooltip, Badge, Flex, Divider
 } from '@mantine/core';
@@ -18,6 +18,7 @@ import classes from './App.module.scss';
 import { debugData } from '../utils/debugData';
 import { fetchNui } from '../utils/fetchNui';
 import { useNuiEvent } from '../hooks/useNuiEvent';
+import { useT } from '../utils/locales';
 
 debugData([
     {
@@ -35,6 +36,7 @@ interface KeyAction {
 }
 
 const App: React.FC = () => {
+    const t = useT();
     const [isVisible, setVisible] = useState(false);
     const [isLocked, setIsLocked] = useState(true);
     const [vehPlate, setVehPlate] = useState('NONE');
@@ -53,31 +55,31 @@ const App: React.FC = () => {
     const mainActions: KeyAction[] = [
         {
             id: 'lock',
-            label: 'Lock',
+            label: t('lock'),
             icon: <IconLock size={'1.5rem'} stroke={1.5} />,
             color: 'red',
             onClick: () => {
                 setIsLocked(true);
-                fetchNui('toggleLock', vehPlate);
+                fetchNui('toggleLock', { plate: vehPlate, state: true });
             }
         },
         {
             id: 'trunk',
-            label: 'Trunk',
+            label: t('trunk'),
             icon: <IconCarGarage size={'1.5rem'} stroke={1.5} />,
             color: 'blue',
             onClick: () => {
-                fetchNui('toggleTrunk', vehPlate);
+                fetchNui('toggleTrunk', { plate: vehPlate });
             }
         },
         {
             id: 'unlock',
-            label: 'Unlock',
+            label: t('unlock'),
             icon: <IconLockOpen size={'1.5rem'} stroke={1.5} />,
             color: 'green',
             onClick: () => {
                 setIsLocked(false);
-                fetchNui('toggleLock', vehPlate);
+                fetchNui('toggleLock', { plate: vehPlate, state: false });
             }
         },
     ];
@@ -86,40 +88,40 @@ const App: React.FC = () => {
         [
             {
                 id: 'engine',
-                label: 'Engine',
+                label: t('engine'),
                 icon: <IconEngine size={'1rem'} />,
                 color: 'cyan',
                 onClick: () => {
-                    fetchNui('toggleEngine', vehPlate);
+                    fetchNui('toggleEngine', { plate: vehPlate });
                 }
             },
             {
                 id: 'lights',
-                label: 'Lights',
+                label: t('lights'),
                 icon: <IconLighter size={'1rem'} />,
                 color: 'yellow',
                 onClick: () => {
-                    fetchNui('toggleLights', vehPlate);
+                    fetchNui('toggleLights', { plate: vehPlate });
                 }
             }
         ],
         [
             {
                 id: 'horn',
-                label: 'Horn',
+                label: t('horn'),
                 icon: <IconVolume size={'1rem'} />,
                 color: 'pink',
                 onClick: () => {
-                    fetchNui('honkHorn', vehPlate);
+                    fetchNui('honkHorn', { plate: vehPlate });
                 }
             },
             {
                 id: 'find',
-                label: 'Find',
+                label: t('find'),
                 icon: <IconSearch size={'1rem'} />,
                 color: 'grape',
                 onClick: () => {
-                    fetchNui('findVehicle', vehPlate);
+                    fetchNui('findVehicle', { plate: vehPlate });
                 }
             }
         ]
@@ -190,14 +192,14 @@ const App: React.FC = () => {
                         <Paper mb={'xs'} withBorder radius={'lg'} style={{ overflow: 'hidden' }}>
                             <Flex direction={'column'}>
                                 {mainActions.map((action, index) => (
-                                    <>
-                                        <Tooltip key={action.id} label={action.label}>
-                                            <Paper className={classes.mainAction} p={'md'} py={'lg'}>
+                                    <React.Fragment key={action.id}>
+                                        <Tooltip label={action.label}>
+                                            <Paper className={classes.mainAction} p={'md'} py={'lg'} onClick={action.onClick}>
                                                 <Flex align={'center'} justify={'center'}>{action.icon}</Flex>
                                             </Paper>
                                         </Tooltip>
                                         {index < mainActions.length - 1 && <Divider opacity={.75} />}
-                                    </>
+                                    </React.Fragment>
                                 ))}
                             </Flex>
                         </Paper>
