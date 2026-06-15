@@ -13,7 +13,6 @@
     pointer-events: auto;
     background: #141414ef !important;
     border: 1px solid rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(10px);
     width: 12rem;
 
     &::before {
@@ -23,7 +22,7 @@
         left: 50%;
         transform: translateX(-50%);
         width: 60%;
-        height: 3px;
+        height: 0.1875rem;
         background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
         border-radius: 0 0 50% 50%;
     }
@@ -64,12 +63,12 @@
 .swipePage {
     min-width: 100%;
     flex-shrink: 0;
-    padding: 8px 0;
+    padding: 0.5rem 0;
 }
 
 .pageIndicator {
-    width: 8px;
-    height: 8px;
+    width: 0.5rem;
+    height: 0.5rem;
     border-radius: 50%;
     background: rgba(255, 255, 255, 0.2);
     cursor: pointer;
@@ -82,8 +81,8 @@
 
 .activeIndicator {
     background: var(--mantine-color-blue-5);
-    width: 20px;
-    border-radius: 4px;
+    width: 1.25rem;
+    border-radius: 0.25rem;
 
     &:hover {
         background: var(--mantine-color-blue-4);
