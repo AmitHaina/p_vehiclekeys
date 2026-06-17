@@ -181,6 +181,12 @@ function Locks:toggleLockState(netId, state, isSource)
     local lockState = state and 1 or 2
     SetVehicleDoorsLocked(entity, lockState)
     SetVehicleDoorsLockedForAllPlayers(entity, lockState == 2)
+
+    -- unlocking with the key silences any active theft alarm
+    if state then
+        TriggerEvent('p_vehiclekeys/client/theft/stopAlarm', netId)
+    end
+    
     if Config.Locks.carEffect then
         Locks:playVehicleLock(entity)
     end

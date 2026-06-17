@@ -74,7 +74,7 @@
     "upgrade_failed": "Upgrade zabezpečení vozidla selhal",
     "upgrade_already_maxed": "Toto vozidlo má již maximální zabezpečení",
     "upgrade_job_required": "Pro upgrade zabezpečení musíte být mechanik",
-    "upgrade_wrong_job": "Pro upgrade zabezpečení vozidla musíte mít práci %s",
+    "upgrade_wrong_job": "Pro upgrade zabezpečení vozidla musíte mít práci",
     "upgrade_missing_item": "Chybí vám potřebný %s",
     "unlock_vehicle": "Odemknout vozidlo",
     "car_theft": "Krádež vozidla",

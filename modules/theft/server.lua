@@ -50,6 +50,37 @@ RegisterNetEvent('p_vehiclekeys/server/theft/unlock', function(netId)
     end
 end)
 
+local function findKeyOwner(plate)
+    for _, playerId in ipairs(GetPlayers()) do
+        playerId = tonumber(playerId)
+        if Bridge.Inventory.getItemCount(playerId, 'car_key', {plate = plate}) >= 1 then
+            return playerId
+        end
+    end
+end
+
+RegisterNetEvent('p_vehiclekeys/server/theft/triggerAlarm', function(netId, reason)
+    local _source = source
+    if not Config.Theft.alarm or not Config.Theft.alarm.enabled then return end
+
+    local entity = getValidatedVehicle(_source, netId, 10.0)
+    if not entity then return end
+
+    local entityOwner = NetworkGetEntityOwner(entity)
+    if entityOwner and entityOwner > 0 then
+        TriggerClientEvent('p_vehiclekeys/client/theft/triggerAlarm', entityOwner, netId, Config.Theft.alarm.duration)
+    end
+
+    if Config.Theft.alarm.notifyOwner then
+        local plate = Utils:trim(GetVehicleNumberPlateText(entity))
+        local keyOwnerId = findKeyOwner(plate)
+        if keyOwnerId and keyOwnerId ~= _source then
+            local localeKey = reason == 'start' and 'alarm_owner_start_notify' or 'alarm_owner_fail_notify'
+            Bridge.Notify.showNotify(keyOwnerId, locale(localeKey), 'error')
+        end
+    end
+end)
+
 RegisterNetEvent('p_vehiclekeys/server/theft/upgradeSecurity', function(netId)
     local _source = source
     if not Config.SecurityUpgrade.enabled then return end
@@ -58,7 +89,7 @@ RegisterNetEvent('p_vehiclekeys/server/theft/upgradeSecurity', function(netId)
     if not entity then return end
 
     local job = Bridge.Framework.getPlayerJob(_source)
-    if job?.name ~= Config.SecurityUpgrade.requiredJob then
+    if not lib.table.contains(Config.SecurityUpgrade.requiredJob, job?.name) then
         return Bridge.Notify.showNotify(_source, locale('upgrade_wrong_job'), 'error')
     end
 

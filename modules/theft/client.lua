@@ -34,16 +34,17 @@ function Theft:alertPolice()
     })
 end
 
+function Theft:triggerAlarm(vehicle, reason)
+    if not Config.Theft.alarm or not Config.Theft.alarm.enabled then return end
+    if not vehicle or not DoesEntityExist(vehicle) then return end
+    TriggerServerEvent('p_vehiclekeys/server/theft/triggerAlarm', NetworkGetNetworkIdFromEntity(vehicle), reason)
+end
+
 function Theft:playBreakInAnim()
     local animDict = lib.requestAnimDict('veh@break_in@0h@p_m_one@')
     TaskPlayAnim(cache.ped, animDict, 'low_force_entry_ds', 3.0, 3.0, -1, 17, 0, false, false, false)
     RemoveAnimDict(animDict)
 end
-
-RegisterCommand('breakin', function()
-    DisplayRadar(false)
-    Theft:playBreakInAnim()
-end)
 
 function Theft:getSecurityTier(vehicle)
     if not vehicle or not DoesEntityExist(vehicle) then
@@ -134,10 +135,15 @@ function Theft:startLockpick(vehicle)
 
 
     local difficulty = self:getDifficulty(vehicle)
+    local tier = self:getSecurityTier(vehicle)
     self.isLockpicking = true
     self.antiSpam = GetGameTimer() + Config.Theft.cooldown
     self.targetVehicle = vehicle
     self:playBreakInAnim()
+
+    if Config.Theft.alarm.enabled and tier >= Config.Theft.alarm.onStartMinTier then
+        self:triggerAlarm(vehicle, 'start')
+    end
 
     if difficulty == 'expert' then
         SendNUIMessage({action = 'setVisibleJammer', data = true})
@@ -188,6 +194,9 @@ RegisterNUICallback('lockpickResult', function(data, cb)
 
         if data.reason ~= 'cancelled' then
             Theft:alertPolice()
+            if Config.Theft.alarm.enabled and Config.Theft.alarm.onFail.lockpick then
+                Theft:triggerAlarm(Theft.targetVehicle, 'fail')
+            end
         end
     end
 
@@ -225,6 +234,9 @@ RegisterNUICallback('jammerResult', function(data, cb)
     ClearPedTasks(cache.ped)
     Bridge.Notify.showNotify(locale(data.reason == 'timeout' and 'jammer_timeout' or 'jammer_failed'), 'error')
     Theft:alertPolice()
+    if Config.Theft.alarm.enabled and Config.Theft.alarm.onFail.jammer then
+        Theft:triggerAlarm(Theft.targetVehicle, 'fail')
+    end
 
     Wait(1500)
     SendNUIMessage({action = 'setVisibleJammer', data = false})
@@ -252,6 +264,9 @@ RegisterNUICallback('hotwireResult', function(data, cb)
 
         if data.reason ~= 'cancelled' then
             Theft:alertPolice()
+            if Config.Theft.alarm.enabled and Config.Theft.alarm.onFail.hotwire then
+                Theft:triggerAlarm(Theft.targetVehicle, 'fail')
+            end
         end
     end
 
@@ -313,6 +328,12 @@ function Theft:startHotwire(vehicle)
     self.targetVehicle = vehicle
 
     local difficulty = self:getDifficulty(vehicle)
+    local tier = self:getSecurityTier(vehicle)
+
+    if Config.Theft.alarm.enabled and tier >= Config.Theft.alarm.onStartMinTier then
+        self:triggerAlarm(vehicle, 'start')
+    end
+
     SendNUIMessage({action = 'setVisibleHotwire', data = true})
     SendNUIMessage({
         action = 'startHotwire',
@@ -480,6 +501,62 @@ RegisterNetEvent('p_vehiclekeys/client/theft/useLockpick', function()
             Theft:startLockpick(closestVeh)
         end
     end
+end)
+
+Theft.activeAlarms = {}
+
+function Theft:stopAlarm(netId)
+    self.activeAlarms[netId] = nil
+    local entity = NetworkGetEntityFromNetworkId(netId)
+    if entity and DoesEntityExist(entity) then
+        SetVehicleAlarm(entity, false)
+        SetVehicleIndicatorLights(entity, 0, false)
+        SetVehicleIndicatorLights(entity, 1, false)
+        SetVehicleLights(entity, 0)
+    end
+end
+
+RegisterNetEvent('p_vehiclekeys/client/theft/triggerAlarm', function(netId, duration)
+    local entity = NetworkGetEntityFromNetworkId(netId)
+    if not entity or not DoesEntityExist(entity) then return end
+
+    Theft.activeAlarms[netId] = true
+    local alarmEnd = GetGameTimer() + duration
+    Citizen.CreateThread(function()
+        local control = GetGameTimer() + 1000
+        while not NetworkHasControlOfEntity(entity) and GetGameTimer() < control do
+            NetworkRequestControlOfEntity(entity)
+            Citizen.Wait(0)
+        end
+
+        SetVehicleAlarm(entity, true)
+        StartVehicleAlarm(entity)
+
+        local on = false
+        local nextToggle = 0
+        while Theft.activeAlarms[netId] and DoesEntityExist(entity) and GetGameTimer() < alarmEnd do
+            if GetGameTimer() >= nextToggle then
+                on = not on
+                nextToggle = GetGameTimer() + 500
+            end
+            SetVehicleLights(entity, on and 2 or 1)
+            SetVehicleIndicatorLights(entity, 0, on)
+            SetVehicleIndicatorLights(entity, 1, on)
+            Citizen.Wait(0)
+        end
+
+        Theft.activeAlarms[netId] = nil
+        if DoesEntityExist(entity) then
+            SetVehicleAlarm(entity, false)
+            SetVehicleIndicatorLights(entity, 0, false)
+            SetVehicleIndicatorLights(entity, 1, false)
+            SetVehicleLights(entity, 0)
+        end
+    end)
+end)
+
+AddEventHandler('p_vehiclekeys/client/theft/stopAlarm', function(netId)
+    Theft:stopAlarm(netId)
 end)
 
 return Theft

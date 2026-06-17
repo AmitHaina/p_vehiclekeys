@@ -74,7 +74,7 @@
     "upgrade_failed": "Failed to upgrade vehicle security",
     "upgrade_already_maxed": "This vehicle already has maximum security",
     "upgrade_job_required": "You need to be a mechanic to upgrade security",
-    "upgrade_wrong_job": "You must be in the %s job to upgrade vehicle security",
+    "upgrade_wrong_job": "You are not allowed to upgrade vehicle security",
     "upgrade_missing_item": "You are missing the required %s",
     "unlock_vehicle": "Unlock Vehicle",
     "car_theft": "Vehicle Theft",
@@ -87,5 +87,7 @@
     "no_vehicle_found": "No vehicle with this plate nearby",
     "using_unlock_tool": "Unlocking vehicle...",
     "blip_your_vehicle": "Your Vehicle",
-    "you_need_signal_jammer": "You need a signal jammer to bypass this vehicle's security"
+    "you_need_signal_jammer": "You need a signal jammer to bypass this vehicle's security",
+    "alarm_owner_fail_notify": "Your vehicle alarm went on, someone tried to break in!",
+    "alarm_owner_start_notify": "Your vehicle alarm went on, someone is breaking into your vehicle!"
 }

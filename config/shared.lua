@@ -6,14 +6,8 @@ local Config = {}
 
 ---@class Config.Settings
 ---@field keepSteeringWheel: boolean Whether to keep steering wheel position when exiting vehicle
----@field vehicleTiers: table Vehicle class to tier mapping for security upgrades
 Config.Settings = {
     keepSteeringWheel = true, -- Whether to keep steering wheel position when exiting vehicle
-    vehicleTiers = {
-        ['low'] = {0, 1, 8, 11, 12, 13},
-        ['medium'] = {2, 3, 4, 9, 10, 14, 20, 21, 22},
-        ['high'] = {5, 6, 7, 15, 16, 17, 18, 19}
-    }
 }
 
 ---@class Config.Locks
@@ -71,6 +65,21 @@ Config.Theft = {
     cooldown = 5000,
     alertPolice = true,
     policeAlertChance = 50,
+    alarm = {
+        enabled = true,
+        -- Trigger vehicle alarm on failed minigame
+        onFail = {
+            lockpick = true,
+            hotwire = true,
+            jammer = true,
+        },
+        -- Security tier at which alarm also triggers when the minigame starts (0 = always, 2 = tier 2+, etc.)
+        onStartMinTier = 2,
+        -- Notify online key owner when alarm fires
+        notifyOwner = true,
+        -- How long the alarm plays in ms
+        duration = 30000,
+    },
     difficulties = {
         easy = {
             pins = 3,
@@ -119,7 +128,7 @@ Config.Theft = {
         [8] = 'easy',      -- Motorcycles
         [9] = 'medium',    -- Off-road
         [10] = 'hard',     -- Industrial
-        [11] = 'medium',   -- Utility
+        [11] = 'medium',   -- `Utility
         [12] = 'easy',     -- Vans
         [13] = 'easy',     -- Cycles
         [14] = 'easy',     -- Boats
