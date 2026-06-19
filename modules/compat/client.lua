@@ -249,6 +249,22 @@ if shouldShim('qs-vehiclekeys') then
     registerExport('qs-vehiclekeys', 'RemoveKeys', function(plate, _model)
         removeKeyByPlate(plate)
     end)
+
+    registerExport('qs-vehiclekeys', 'GiveKeysAuto', function()
+        local vehicle = cache.vehicle
+        if not vehicle or vehicle == 0 then return end
+        local plate = toPlate(GetVehicleNumberPlateText(vehicle))
+        if not plate then return end
+        addKeyByPlate(plate)
+    end)
+
+    registerExport('qs-vehiclekeys', 'RemoveKeysAuto', function()
+        local vehicle = cache.vehicle
+        if not vehicle or vehicle == 0 then return end
+        local plate = toPlate(GetVehicleNumberPlateText(vehicle))
+        if not plate then return end
+        removeKeyByPlate(plate)
+    end)
 end
 
 if shouldShim('p_carkeys') then
