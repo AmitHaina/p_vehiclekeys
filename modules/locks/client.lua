@@ -166,7 +166,7 @@ end
 
 function Locks:checkVehicleDoors(entity)
     for i = 0, 5 do
-        if GetVehicleDoorAngleRatio(entity, i) > 0.0 then
+        if not IsVehicleDoorDamaged(entity, i) and GetVehicleDoorAngleRatio(entity, i) > 0.0 then
             return false
         end
     end

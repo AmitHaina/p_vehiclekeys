@@ -37,4 +37,16 @@ if Bridge?.Config?.Debug then
     end, false)
 end
 
+Citizen.CreateThread(function()
+    while GetResourceState('ox_inventory') == 'missing' do
+        Citizen.Wait(100)
+    end
+
+    if GetResourceState('ox_inventory') == 'started' then
+        exports['ox_inventory']:displayMetadata({
+            plate = locale('plate'),
+        })
+    end
+end)
+
 return Keys
