@@ -9,12 +9,14 @@
       - MrNewbVehicleKeys
       - qs-vehiclekeys
       - p_carkeys
+      - wasabi_carlock
 
     A shim is only registered when the real resource is not running.
 
-    Note: giving/removing keys by plate is validated server-side, so the
-    matching vehicle must exist within 50m of the player (true for the
-    usual vehicle shop / garage / job script use cases).
+    Note: GIVING a key by plate is validated server-side, so the matching
+    vehicle must exist within 50m of the player (true for the usual vehicle
+    shop / garage / job script use cases). REMOVING a key never requires the
+    vehicle to be present.
 ]]
 
 local Compat = {}
@@ -24,6 +26,7 @@ if not Config.Compat?.enabled then return Compat end
 local Utils = require 'modules.utils.client'
 local Keys = require 'modules.keys.client'
 local Engine = require 'modules.engine.client'
+local Locks = require 'modules.locks.client'
 
 local shimmed = {}
 
@@ -64,6 +67,24 @@ local function hasKey(plate)
     return Bridge.Inventory.getItemCount('car_key', { plate = plate }) > 0
 end
 
+-- Every plate the local player currently holds a car_key for (metadata is stored
+-- under .metadata on ox-style inventories and .info on qb-style ones).
+local function getAllKeys()
+    local plates = {}
+    local items = Bridge.Inventory.getPlayerItems()
+    if type(items) ~= 'table' then return plates end
+
+    for _, item in pairs(items) do
+        if item and item.name == 'car_key' then
+            local metadata = item.metadata or item.info
+            local plate = metadata and metadata.plate
+            if plate then plates[#plates + 1] = plate end
+        end
+    end
+
+    return plates
+end
+
 local function findVehicleByPlate(plate)
     plate = toPlate(plate)
     if not plate then return end
@@ -99,15 +120,8 @@ local function removeKeyByPlate(plate, removeAll)
     plate = toPlate(plate)
     if not plate then return end
 
-    local vehicle = findVehicleByPlate(plate)
-    if not vehicle then
-        if Bridge?.Config?.Debug then
-            lib.print.warn(('compat: removeKey skipped, no vehicle with plate %s nearby'):format(plate))
-        end
-        return
-    end
-
-    Keys:removeKey(plate, vehicle, removeAll)
+    -- Removal doesn't need the vehicle to be nearby (or to exist at all).
+    Keys:removeKey(plate, nil, removeAll)
 end
 
 local function addKeyByEntity(vehicle)
@@ -287,6 +301,44 @@ if shouldShim('p_carkeys') then
     registerExport('p_carkeys', 'HasKeys', function(src, plate)
         return hasKey(src, plate)
     end)
+end
+
+-- wasabi_carlock (client) - https://docs.wasabiscripts.com/advanced-series/wasabi-carlock/exports
+if shouldShim('wasabi_carlock') then
+    registerExport('wasabi_carlock', 'ToggleLock', function()
+        Locks:toggleLock()
+    end)
+
+    registerExport('wasabi_carlock', 'HasKey', function(plate)
+        return hasKey(plate)
+    end)
+
+    registerExport('wasabi_carlock', 'GiveKey', function(plate)
+        addKeyByPlate(plate)
+        return toPlate(plate)
+    end)
+
+    registerExport('wasabi_carlock', 'RemoveKey', function(plate)
+        removeKeyByPlate(plate, true)
+        return true
+    end)
+
+    registerExport('wasabi_carlock', 'GetAllKeys', function()
+        return getAllKeys()
+    end)
+
+    -- Interactive give/manage menus have no p_vehiclekeys equivalent; stub them
+    -- so dependent scripts don't error on a missing export.
+    local function unsupportedMenu(name)
+        return function()
+            if Bridge?.Config?.Debug then
+                lib.print.warn(('compat: wasabi_carlock %s has no p_vehiclekeys equivalent'):format(name))
+            end
+        end
+    end
+
+    registerExport('wasabi_carlock', 'GiveKeyMenu', unsupportedMenu('GiveKeyMenu'))
+    registerExport('wasabi_carlock', 'ManageKeysMenu', unsupportedMenu('ManageKeysMenu'))
 end
 
 return Compat

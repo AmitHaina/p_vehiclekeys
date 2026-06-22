@@ -3,7 +3,7 @@ game 'gta5'
 author 'pScripts [pscripts-store.com - discord.gg/piotreqscripts]'
 description 'Multi-Framework Advanced Vehicle Keys System'
 lua54 'yes'
-version '1.0.4'
+version '1.0.5'
 
 ui_page 'web/build/index.html'
 

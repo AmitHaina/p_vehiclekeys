@@ -13,10 +13,12 @@ function Keys:createKey(plate, entity)
     TriggerServerEvent('p_vehiclekeys/createKey', plate, netId)
 end
 
-function Keys:removeKey(plate, entity, removeAll)
-    local netId = getVehicleNetId(plate, entity)
-    if not netId then return end
-    TriggerServerEvent('p_vehiclekeys/removeKey', plate, netId, removeAll)
+-- Removal only needs the plate; the vehicle entity is intentionally ignored so
+-- keys can be removed even when the vehicle is gone or out of range.
+function Keys:removeKey(plate, _entity, removeAll)
+    plate = plate and Utils:trim(plate) or ''
+    if plate == '' then return end
+    TriggerServerEvent('p_vehiclekeys/removeKey', plate, removeAll)
 end
 
 exports('createKey', function(plate, entity)

@@ -39,9 +39,15 @@ function Keys:createKey(playerId, plate, netId)
     Bridge.Inventory.addItem(playerId, 'car_key', 1, { plate = plate })
 end
 
-function Keys:removeKey(playerId, plate, netId, removeAll)
-    plate = validateVehicle(playerId, plate, netId, 'removeKey')
-    if not plate then return end
+function Keys:removeKey(playerId, plate, removeAll)
+    if not playerId or playerId < 1 then
+        return lib.print.error('[removeKey] Invalid player ID provided', playerId)
+    end
+
+    plate = type(plate) == 'string' and Utils:trim(plate) or ''
+    if plate == '' then
+        return lib.print.error('[removeKey] Invalid plate provided', playerId)
+    end
 
     local removeCount = removeAll and Bridge.Inventory.getItemCount(playerId, 'car_key', { plate = plate }) or 1
     Bridge.Inventory.removeItem(playerId, 'car_key', removeCount, { plate = plate })
@@ -51,8 +57,8 @@ RegisterNetEvent('p_vehiclekeys/createKey', function(plate, netId)
     Keys:createKey(source, plate, netId)
 end)
 
-RegisterNetEvent('p_vehiclekeys/removeKey', function(plate, netId, removeAll)
-    Keys:removeKey(source, plate, netId, removeAll)
+RegisterNetEvent('p_vehiclekeys/removeKey', function(plate, removeAll)
+    Keys:removeKey(source, plate, removeAll)
 end)
 
 Citizen.CreateThread(function()

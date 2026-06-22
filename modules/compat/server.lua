@@ -93,6 +93,27 @@ local function hasKey(playerId, plate)
     return Bridge.Inventory.getItemCount(playerId, 'car_key', { plate = plate }) > 0
 end
 
+-- Every plate the player currently holds a car_key for (metadata is stored under
+-- .metadata on ox-style inventories and .info on qb-style ones).
+local function getAllKeys(playerId)
+    playerId = toPlayerId(playerId)
+    local plates = {}
+    if not playerId then return plates end
+
+    local items = Bridge.Inventory.getPlayerItems(playerId)
+    if type(items) ~= 'table' then return plates end
+
+    for _, item in pairs(items) do
+        if item and item.name == 'car_key' then
+            local metadata = item.metadata or item.info
+            local plate = metadata and metadata.plate
+            if plate then plates[#plates + 1] = plate end
+        end
+    end
+
+    return plates
+end
+
 -- For client-triggered compat events: the matching vehicle must exist near the player
 local function findVehicleByPlate(plate, playerId)
     plate = toPlate(plate)
@@ -238,6 +259,27 @@ for _, resource in ipairs({ 'qs-vehiclekeys', 'qs-carkeys' }) do
             removeKey(src, plate)
         end)
     end
+end
+
+-- wasabi_carlock (server) - https://docs.wasabiscripts.com/advanced-series/wasabi-carlock/exports
+if shouldShim('wasabi_carlock') then
+    registerExport('wasabi_carlock', 'GiveKey', function(src, plate)
+        giveKey(src, plate)
+        return toPlate(plate)
+    end)
+
+    registerExport('wasabi_carlock', 'RemoveKey', function(src, plate)
+        removeKey(src, plate, true)
+        return true
+    end)
+
+    registerExport('wasabi_carlock', 'HasKey', function(src, plate)
+        return hasKey(src, plate)
+    end)
+
+    registerExport('wasabi_carlock', 'GetAllKeys', function(src)
+        return getAllKeys(src)
+    end)
 end
 
 return Compat
