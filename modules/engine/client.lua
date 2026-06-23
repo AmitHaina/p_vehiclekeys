@@ -6,6 +6,10 @@ lib.onCache('ped', function(value)
     Engine:applyFlags()
 end)
 
+lib.onCache('vehicle', function(value)
+    SetVehicleNeedsToBeHotwired(value, false)
+end)
+
 function Engine:applyFlags()
     local playerPed = cache.ped
     SetPedConfigFlag(playerPed, 241, true) -- Prevent engine stopping
@@ -14,6 +18,7 @@ function Engine:applyFlags()
 end
 
 Citizen.CreateThread(function()
+    Engine:applyFlags()
     if Config.Engine.preventDisable or Config.Locks.lockNpcVehicles then
         while true do
             Citizen.Wait(100)
